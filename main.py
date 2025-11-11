@@ -7,28 +7,12 @@ from datetime import datetime, timezone
 from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 
-MONGO_URI = "mongodb+srv://atulkumaractowiz_db_user:utXB2kQPyiuxUxTk@cluster0.uxw0aog.mongodb.net/?retryWrites=true&w=majority&tls=true&appName=Cluster0"
+MONGO_URI = "mongodb+srv://atulkumaractowiz_db_user:utXB2kQPyiuxUxTk@cluster0.uxw0aog.mongodb.net/?appName=Cluster0"
 DB_NAME = "morrisons_db"
 
-app = FastAPI(
-    title="Morrison's Product API",
-    description="Fetch Morrison's product details and reviews programmatically",
-    version="1.0.0",
-)
-
-# ---------------------- MongoDB connection ----------------------
-@app.on_event("startup")
-def startup_db_client():
-    app.mongodb_client = MongoClient(MONGO_URI)
-    app.db = app.mongodb_client[DB_NAME]
-    app.logs_collection = app.db["api_logs"]
-    print("✅ MongoDB connection established")
-
-@app.on_event("shutdown")
-def shutdown_db_client():
-    app.mongodb_client.close()
-    print("❌ MongoDB connection closed")
-# ----------------------------------------------------------------
+client = MongoClient(MONGO_URI)
+db = client[DB_NAME]
+logs_collection = db["api_logs"]
 
 def convert_datetime(dt_str):
     try:
@@ -39,9 +23,12 @@ def convert_datetime(dt_str):
 def review_fetch(product_uuid, sort_option="NEWEST"):
     url = f"https://groceries.morrisons.com/api/ecomreviews/v1/products/{product_uuid}/reviews"
     reviews_list = []
+
     try:
         params = {"sortOptionId": sort_option, "nextPage": 1}
-        response = requests.get(url, params=params, headers=HEADERS, impersonate="chrome120", timeout=15)
+        response = requests.get(
+            url, params=params, headers=HEADERS, impersonate="chrome120", timeout=15
+        )
         response.raise_for_status()
         json_data = response.json()
 
@@ -56,6 +43,7 @@ def review_fetch(product_uuid, sort_option="NEWEST"):
                 "verified_purchase": review.get("isVerifiedBuyer"),
                 "location": review.get("locale"),
             })
+
         return reviews_list
     except Exception as e:
         print(f"[ERROR] Failed to fetch reviews for {product_uuid}: {e}")
@@ -64,8 +52,11 @@ def review_fetch(product_uuid, sort_option="NEWEST"):
 def fetch_product_details(retailer_product_id):
     url = "https://groceries.morrisons.com/api/webproductpagews/v5/products/bop"
     params = {"retailerProductId": retailer_product_id}
+
     try:
-        response = requests.get(url, params=params, headers=HEADERS, impersonate="chrome120", timeout=15)
+        response = requests.get(
+            url, params=params, headers=HEADERS, impersonate="chrome120", timeout=15
+        )
         response.raise_for_status()
         data = response.json()
 
@@ -102,74 +93,90 @@ def fetch_product_details(retailer_product_id):
 
         review_id = jmespath.search("product.productId", data)
         product["reviews"] = review_fetch(review_id)
+
         return product
+
     except Exception as e:
         print(f"[ERROR] Fetching product {retailer_product_id}: {e}")
         return None
+
+app = FastAPI(
+    title="Morrison's Product API",
+    description="Fetch Morrison's product details and reviews programmatically",
+    version="1.0.0",
+)
 
 @app.get("/")
 def home():
     return {"message": "Welcome to Morrison's Product API"}
 
 @app.get("/product/{product_id}")
-def get_product(request: Request, product_id: str):
+async def get_product(request: Request, product_id: str):
     start_time = datetime.now(timezone.utc)
     client_ip = request.client.host
-
-    logs_collection = app.logs_collection
     log_entry = {
         "endpoint": f"/product/{product_id}",
         "method": "GET",
         "client_ip": client_ip,
         "timestamp": start_time,
         "status": "STARTED",
-        "product_id": product_id,
+        "product_id": product_id
     }
 
     log_id = logs_collection.insert_one(log_entry).inserted_id
 
     try:
+        # Fetch product details
         result = fetch_product_details(product_id)
+
         end_time = datetime.now(timezone.utc)
-        response_time_ms = (end_time - start_time).total_seconds() * 1000
+        response_time_ms = (end_time - start_time).total_seconds() * 1000  # in ms
 
         if not result:
-            logs_collection.update_one({"_id": log_id}, {
-                "$set": {
-                    "status": "FAILED",
-                    "message": "Product not found",
-                    "response_time_ms": response_time_ms,
-                    "end_time": end_time,
+            logs_collection.update_one(
+                {"_id": log_id},
+                {
+                    "$set": {
+                        "status": "FAILED",
+                        "message": "Product not found",
+                        "response_time_ms": response_time_ms,
+                        "end_time": end_time
+                    }
                 }
-            })
+            )
             return JSONResponse({"error": "Product not found or unavailable"}, status_code=404)
 
-        logs_collection.update_one({"_id": log_id}, {
-            "$set": {
-                "status": "SUCCESS",
-                "response_time_ms": response_time_ms,
-                "end_time": end_time,
-                "response_data": result,
+        logs_collection.update_one(
+            {"_id": log_id},
+            {
+                "$set": {
+                    "status": "SUCCESS",
+                    "response_time_ms": response_time_ms,
+                    "end_time": end_time,
+                    "response_data": result  # Be careful: could be large
+                }
             }
-        })
+        )
 
         return result
 
     except Exception as e:
         end_time = datetime.now(timezone.utc)
         response_time_ms = (end_time - start_time).total_seconds() * 1000
-        logs_collection.update_one({"_id": log_id}, {
-            "$set": {
-                "status": "ERROR",
-                "message": str(e),
-                "response_time_ms": response_time_ms,
-                "end_time": end_time,
+
+        logs_collection.update_one(
+            {"_id": log_id},
+            {
+                "$set": {
+                    "status": "ERROR",
+                    "message": str(e),
+                    "response_time_ms": response_time_ms,
+                    "end_time": end_time
+                }
             }
-        })
+        )
+
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="localhost", port=8000, reload=True)
-
-
-
