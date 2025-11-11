@@ -112,7 +112,7 @@ def home():
     return {"message": "Welcome to Morrison's Product API"}
 
 @app.get("/product/{product_id}")
-async def get_product(request: Request, product_id: str):
+def get_product(request: Request, product_id: str):
     start_time = datetime.now(timezone.utc)
     client_ip = request.client.host
 
@@ -170,3 +170,4 @@ async def get_product(request: Request, product_id: str):
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="localhost", port=8000, reload=True)
+
