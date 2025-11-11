@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 
-MONGO_URI = "mongodb+srv://atulkumaractowiz_db_user:utXB2kQPyiuxUxTk@cluster0.uxw0aog.mongodb.net/?appName=Cluster0"
+MONGO_URI = "mongodb+srv://atulkumaractowiz_db_user:utXB2kQPyiuxUxTk@cluster0.uxw0aog.mongodb.net/?retryWrites=true&w=majority&tls=true&appName=Cluster0"
 DB_NAME = "morrisons_db"
 
 app = FastAPI(
@@ -170,5 +170,6 @@ def get_product(request: Request, product_id: str):
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="localhost", port=8000, reload=True)
+
 
 
